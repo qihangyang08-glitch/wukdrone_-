@@ -36,6 +36,10 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-
 # 安装
 sudo apt-get update
 sudo apt-get install gz-garden
+
+# 安装opencv开发包
+sudo apt update
+sudo apt install libopencv-dev -y
 ```
 
 #### 2. 安装 ArduPilot-Gazebo 插件
