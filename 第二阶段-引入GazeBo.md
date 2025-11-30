@@ -156,10 +156,10 @@ wsl --shutdown
     ```bash
     # --- WSL2 GPU Fix ---
     # 强制使用 D3D12 (连接 Windows 显卡的核心通道)
-    export MESA_LOADER_DRIVER_OVERRIDE=d3d12
+    export GALLIUM_DRIVER=d3d12
 
     # 强制 Gazebo/OpenGL 走硬件加速
-    export LIBGL_ALWAYS_SOFTWARE=0
+    export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
     ```
 
 4.  保存退出，并刷新：
