@@ -44,7 +44,7 @@ sudo apt-get install gz-garden
 ```bash
 # 安装依赖
 sudo apt update
-sudo apt install libgz-sim7-dev rapidjson-dev
+sudo apt install libgz-sim8-dev rapidjson-dev
 
 # 回到主目录
 cd ~
