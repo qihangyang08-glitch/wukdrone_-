@@ -126,12 +126,16 @@ Ubuntu 24.04 有时精简了连接 DirectX 12 的中间层库，我们需要手�
 sudo apt update
 
 # 2. 安装 Mesa 的 D3D12 驱动和 Vulkan 支持
-sudo apt install libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers libgl1-mesa-glx libgl1-mesa-dev -y
+sudo apt install libgl1 libglx-mesa0 libgl1-mesa-dri mesa-vulkan-drivers libgl1-mesa-dev -y
 
 # 3. (关键) 删除可能冲突的旧配置
 # 有时候为了强行开启 GPU，乱设环境变量反而会导致回落到 CPU
 unset MESA_LOADER_DRIVER_OVERRIDE
 unset MESA_D3D12_DEFAULT_ADAPTER_NAME
+
+# 4.回到 Windows，以管理员身份打开 PowerShell。执行强制更新命令：
+wsl --update
+wsl --shutdown
 ```
 
 ---
@@ -150,14 +154,11 @@ unset MESA_D3D12_DEFAULT_ADAPTER_NAME
 3.  **换成下面这组新的配置：**
 
     ```bash
-    # --- WSL2 GPU Force D3D12 ---
-    # 强制使用 D3D12 驱动 (这是 WSLg 的核心)
+    # --- WSL2 GPU Fix ---
+    # 强制使用 D3D12 (连接 Windows 显卡的核心通道)
     export MESA_LOADER_DRIVER_OVERRIDE=d3d12
 
-    # 告诉 D3D12 驱动去寻找 NVIDIA 显卡
-    export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
-
-    # 显式启用 OpenGL 3.3+ (Gazebo 需要)
+    # 强制 Gazebo/OpenGL 走硬件加速
     export LIBGL_ALWAYS_SOFTWARE=0
     ```
 
@@ -166,21 +167,9 @@ unset MESA_D3D12_DEFAULT_ADAPTER_NAME
     source ~/.bashrc
     ```
 
----
+5.  **重新打开 Ubuntu 终端**。
 
-##### 第四步：重启 WSL (彻底重置)
-
-为了让显卡驱动重新加载，必须彻底重启 WSL。
-
-1.  **在 Windows PowerShell** 中输入：
-    ```powershell
-    wsl --shutdown
-    ```
-    *(这一步会关掉所有 Ubuntu 窗口)*
-
-2.  **重新打开 Ubuntu 终端**。
-
-3.  **再次检查：**
+6.  **再次检查：**
     ```bash
     glxinfo -B
     ```
