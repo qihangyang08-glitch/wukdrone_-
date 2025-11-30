@@ -95,59 +95,100 @@ WSL2 虽然支持 GUI，但默认策略非常保守，往往会调用核显（Mi
 
 ---
 
-#### 第一阶段：强制 WSL2 使用 NVIDIA 独显 (GPU Fix)
+#### 第一阶段：优化显卡配置
 
-我们需要在 Linux 层面告诉系统：“忽略核显，只用那个名字带 NVIDIA 的家伙”。
+##### 第一步：检查 WSL 版本（绝大多数人的坑）
 
-##### 1. 确认 Windows 驱动
-确保你的 Windows 主机安装了最新的 **NVIDIA GeForce Experience 驱动**（WSL 的驱动是包含在 Windows 显卡驱动里的，不需要在 Ubuntu 里装显卡驱动）。
+虽然你是在 WSL 里，但如果它是 **WSL 1** 而不是 **WSL 2**，它是绝对无法调用 GPU 的。
 
-##### 2. 在 Ubuntu 里安装诊断工具
-打开 WSL 终端，安装 `mesa-utils`，用来检查现在到底是谁在干活。
+1.  **回到 Windows PowerShell（管理员）**，输入：
+    ```powershell
+    wsl --list --verbose
+    ```
+    *(或者 `wsl -l -v`)*
+
+2.  **检查结果：**
+    *   如果 `VERSION` 列显示的是 **1**：
+        *   **修复：** 输入 `wsl --set-version Ubuntu 2`（或者你的发行版名字）。等待转换完成。
+    *   如果 `VERSION` 列显示的是 **2**：
+        *   继续下一步。
+
+---
+
+##### 第二步：安装 WSLg 专用驱动包 (Ubuntu 内部)
+
+Ubuntu 24.04 有时精简了连接 DirectX 12 的中间层库，我们需要手动补全。
+
+回到 **Ubuntu 终端**，执行：
+
 ```bash
+# 1. 确保系统最新
 sudo apt update
-sudo apt install mesa-utils -y
+
+# 2. 安装 Mesa 的 D3D12 驱动和 Vulkan 支持
+sudo apt install libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers libgl1-mesa-glx libgl1-mesa-dev -y
+
+# 3. (关键) 删除可能冲突的旧配置
+# 有时候为了强行开启 GPU，乱设环境变量反而会导致回落到 CPU
+unset MESA_LOADER_DRIVER_OVERRIDE
+unset MESA_D3D12_DEFAULT_ADAPTER_NAME
 ```
 
-##### 3. 检查当前显卡（此时应该是核显）
-输入：
-```bash
-glxinfo -B
-```
-*   看 `Device:` 这一行。如果显示 `D3D12 (Intel(R) UHD Graphics...)` 或者 `llvmpipe`，说明确实在用核显或 CPU 软解。
+---
 
-##### 4. 配置环境变量（核心步骤）
-我们需要修改 `.bashrc`，强制指定高性能适配器。
+##### 第三步：修改环境变量（修正之前的方案）
 
-打开配置文件：
-```bash
-code ~/.bashrc
-```
+之前的 `zink` 方案在某些新硬件上可能失效，导致回滚到 `llvmpipe`。我们要换成最原生的 **d3d12** 方案。
 
-**在文件最末尾，加入以下 3 行金科玉律：**
+1.  打开配置文件：
+    ```bash
+    code ~/.bashrc
+    ```
 
-```bash
-# --- GPU Acceleration Fix ---
-# 1. 强制使用 D3D12 后端 (WSLg 的核心)
-export MESA_LOADER_DRIVER_OVERRIDE=zink 
-# 或者用 export MESA_LOADER_DRIVER_OVERRIDE=d3d12 (如果zink有问题换这个)
+2.  **找到之前让你加的那几行 GPU 的配置，全部删掉或注释掉。**
 
-# 2. 关键：筛选包含 "NVIDIA" 字样的显卡
-export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+3.  **换成下面这组新的配置：**
 
-# 3. 强制 Gazebo 使用 OpenGL (兼容性最好)
-export GZ_SIM_RENDER_ENGINE=ogre
-```
+    ```bash
+    # --- WSL2 GPU Force D3D12 ---
+    # 强制使用 D3D12 驱动 (这是 WSLg 的核心)
+    export MESA_LOADER_DRIVER_OVERRIDE=d3d12
 
-**保存并退出**，然后刷新：
-```bash
-source ~/.bashrc
-```
+    # 告诉 D3D12 驱动去寻找 NVIDIA 显卡
+    export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
 
-##### 5. 再次验证
-再次输入 `glxinfo -B`。
-*   **Device:** 这一行必须出现 **NVIDIA GeForce RTX ...** 字样。
-*   如果出现了，恭喜你，卡顿问题解决 90%。
+    # 显式启用 OpenGL 3.3+ (Gazebo 需要)
+    export LIBGL_ALWAYS_SOFTWARE=0
+    ```
+
+4.  保存退出，并刷新：
+    ```bash
+    source ~/.bashrc
+    ```
+
+---
+
+##### 第四步：重启 WSL (彻底重置)
+
+为了让显卡驱动重新加载，必须彻底重启 WSL。
+
+1.  **在 Windows PowerShell** 中输入：
+    ```powershell
+    wsl --shutdown
+    ```
+    *(这一步会关掉所有 Ubuntu 窗口)*
+
+2.  **重新打开 Ubuntu 终端**。
+
+3.  **再次检查：**
+    ```bash
+    glxinfo -B
+    ```
+
+**成功标准：**
+`Device:` 这一行必须包含 **D3D12** (例如 `D3D12 (NVIDIA GeForce RTX 4060...)`)。
+只要这一行变了，Gazebo 就会极其丝滑。
+
 
 ---
 
