@@ -89,121 +89,152 @@ source ~/.bashrc
 
 ### 第二步：运行一个官方 Demo
 
-在你自己造 WuK 的 3D 模型前，我们先跑通官方的四旋翼，看看 3D 效果。
+WSL2 虽然支持 GUI，但默认策略非常保守，往往会调用核显（Microsoft Basic Render Driver）而不是你的 NVIDIA 独显。
 
-1.  **在一个终端窗口启动 Gazebo：**
-    ```bash
-    gz sim -v4 -r iris_runway.sdf
-    ```
-    *   **现象：** 应该会弹出一个 3D 窗口，里面有一条跑道和一架叫 Iris 的四旋翼。
-    *   *如果不弹窗：可能是 WSL 的图形驱动问题，Windows 11 通常直接支持，Windows 10 需要装 VcXsrv。你是 Win11 吗？*
-
-2.  **在另一个终端窗口启动 ArduPilot SITL：**
-    *(注意参数的变化：-f gazebo-iris)*
-    ```bash
-    cd ~/ardupilot
-    sim_vehicle.py -v ArduCopter -f gazebo-iris --console --map
-    ```
-
-3.  **看效果：**
-    *   当 SITL 启动后，你会发现 Gazebo 里的飞机螺旋桨开始转动了！
-    *   在 MAVProxy 输入 `mode guided`, `arm throttle`, `takeoff 5`。
-    *   **你会在 3D 窗口里看到飞机真的飞起来了！**
-
----
-### 第三步：优化方案
-
-
-#### 1. 为什么报错 `Incorrect protocol magic 0`？（核心问题）
-
-**一句话解释：语言不通。**
-
-*   **现状：**
-    *   你的 **Gazebo 插件**（刚才编译的）是最新版的，它讲的是 **“新版二进制语言”**。
-    *   你的 **SITL**（通过 `-f gazebo-iris` 启动）默认配置是用 **“旧版 JSON 文本语言”** 发送数据。
-*   **结果：** Gazebo 插件收到数据包，一检查开头（Magic Number），发现是 0（或者格式不对），不是它期待的 `18458`，所以它拒绝通信。这就导致了“两边没反应”。
-
-**✅ 解决方法：**
-我们需要强迫 SITL 也讲“新版二进制语言”。
-
-1.  **先启动 Gazebo：**
-    ```bash
-    gz sim -v4 -r iris_runway.sdf
-    ```
-2.  **再启动 SITL（不带 -f 参数，先手动配参数）：**
-    为了避免 `-f gazebo-iris` 自动加载旧参数，我们用默认模式启动，然后手动改。
-    ```bash
-    sim_vehicle.py -v ArduCopter --console --map
-    ```
-    *(注意：这时它跑的是你之前改过的那个“鸠占鹊巢”的 WuK 物理模型，但我们先不管它，我们要先连上 Gazebo)*
-
-3.  **在 MAVProxy 终端修改参数：**
-    输入以下指令，把 SITL 切换到 Gazebo 模式：
-    ```bash
-    param set SIM_GZ_ENABLE 1
-    param set SIM_GZ_URI "127.0.0.1:9002"
-    ```
-    *   `SIM_GZ_ENABLE 1`: 开启新版 Gazebo 接口。
-    *   `URI`: 指定通信地址（Gazebo 插件默认监听 9002）。
-
-4.  **重启 SITL：**
-    按 `Ctrl+C` 关掉 SITL，然后再次运行：
-    ```bash
-    sim_vehicle.py -v ArduCopter --console --map
-    ```
-
-5.  **观察：**
-    这时候 Gazebo 里的报错应该会消失，或者变成 `Connected`。你再试着 `mode guided`, `takeoff`，看看 Gazebo 里的飞机动没动。
+为了解决**卡顿**和**连接报错**，我为你整理了一套**“强制独显 + 纯净连接”**的完整执行方案。请按顺序执行。
 
 ---
 
-#### 2. 为什么 Gazebo 很卡？（性能优化）
+#### 第一阶段：强制 WSL2 使用 NVIDIA 独显 (GPU Fix)
 
-你的电脑是游戏本（有独显），但 WSL2 默认可能在用 CPU 跑图形渲染（llvmpipe），或者 Gazebo 的实时因数（Real Time Factor）太高。
+我们需要在 Linux 层面告诉系统：“忽略核显，只用那个名字带 NVIDIA 的家伙”。
 
-**✅ 优化方案：**
+##### 1. 确认 Windows 驱动
+确保你的 Windows 主机安装了最新的 **NVIDIA GeForce Experience 驱动**（WSL 的驱动是包含在 Windows 显卡驱动里的，不需要在 Ubuntu 里装显卡驱动）。
 
-1.  **强制开启 GPU 加速：**
-    在 Ubuntu 终端里，执行以下命令后再启动 Gazebo：
-    ```bash
-    export LIBGL_ALWAYS_SOFTWARE=0
-    export MESA_GL_VERSION_OVERRIDE=3.3
-    gz sim -v4 -r iris_runway.sdf
-    ```
-2.  **检查 WSL 显存：**
-    Gazebo 极吃显存。在 Windows 的任务管理器 -> 性能 -> GPU 栏，看看当你运行 Gazebo 时，**3D** 占用率高不高？如果很低，说明 WSL 没用上显卡。
-    *   *补救：去 NVIDIA 官网下载最新的 Windows 显卡驱动（GeForce Experience），它会自动给 WSL 安装驱动。*
-3.  **不要同时开 Map 和 Console：**
-    如果实在卡，SITL 启动时去掉地图：
-    ```bash
-    sim_vehicle.py -v ArduCopter --console
-    ```
-    *(省掉一个 Map 窗口能省不少资源)*
+##### 2. 在 Ubuntu 里安装诊断工具
+打开 WSL 终端，安装 `mesa-utils`，用来检查现在到底是谁在干活。
+```bash
+sudo apt update
+sudo apt install mesa-utils -y
+```
+
+##### 3. 检查当前显卡（此时应该是核显）
+输入：
+```bash
+glxinfo -B
+```
+*   看 `Device:` 这一行。如果显示 `D3D12 (Intel(R) UHD Graphics...)` 或者 `llvmpipe`，说明确实在用核显或 CPU 软解。
+
+##### 4. 配置环境变量（核心步骤）
+我们需要修改 `.bashrc`，强制指定高性能适配器。
+
+打开配置文件：
+```bash
+code ~/.bashrc
+```
+
+**在文件最末尾，加入以下 3 行金科玉律：**
+
+```bash
+# --- GPU Acceleration Fix ---
+# 1. 强制使用 D3D12 后端 (WSLg 的核心)
+export MESA_LOADER_DRIVER_OVERRIDE=zink 
+# 或者用 export MESA_LOADER_DRIVER_OVERRIDE=d3d12 (如果zink有问题换这个)
+
+# 2. 关键：筛选包含 "NVIDIA" 字样的显卡
+export MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA
+
+# 3. 强制 Gazebo 使用 OpenGL (兼容性最好)
+export GZ_SIM_RENDER_ENGINE=ogre
+```
+
+**保存并退出**，然后刷新：
+```bash
+source ~/.bashrc
+```
+
+##### 5. 再次验证
+再次输入 `glxinfo -B`。
+*   **Device:** 这一行必须出现 **NVIDIA GeForce RTX ...** 字样。
+*   如果出现了，恭喜你，卡顿问题解决 90%。
 
 ---
 
-#### 3. 最关键的概念：为什么“变构”失效了？
+#### 第二阶段：解决“协议魔法数”报错 (Connection Fix)
 
-你问：“我们昨天不是修改了 SITL 的机型了吗？为什么 Gazebo 里还是 Iris，而且不变形？”
+报错 `Incorrect protocol magic` 的原因是：SITL 默认尝试用二进制协议连接，而 Gazebo 插件（ardupilot_gazebo）使用的是 JSON 纯文本协议。我们需要强制 SITL 使用 JSON 模式。
 
-这是一个非常重要的架构分界线。请仔细看下图：
+##### 1. 启动 Gazebo (服务端)
+在第一个终端窗口，启动 Gazebo 和跑道模型：
 
-*   **阶段一（昨天做的）：内部物理引擎**
-    *   **大脑：** ArduPilot
-    *   **身体：** `SIM_Frame.cpp` (**C++ 代码**)
-    *   **现象：** 只有数据，没有画面（或只有 2D 地图）。
-    *   **你的修改：** 你改了 `SIM_Frame.cpp`，所以昨天在 2D 模式下能坠机。
+```bash
+# -s 表示以服务模式运行，-r 表示自动开始播放物理
+gz sim -v4 -r iris_runway.sdf
+```
+*(此时应该能看到 3D 窗口，且因为用了独显，应该比之前流畅)*
 
-*   **阶段二（现在做的）：外部物理引擎**
-    *   **大脑：** ArduPilot
-    *   **身体：** **Gazebo (`iris_runway.sdf`)**
-    *   **现象：** 有 3D 画面。
-    *   **关键点：** 当连接 Gazebo 时，ArduPilot 会**关闭**内部的 `SIM_Frame.cpp`，全权委托 Gazebo 来计算物理。
-    *   **结果：** Gazebo 读取的是 `iris_runway.sdf` 文件。这个文件里定义的是“普通的 Iris 四旋翼”。它**完全不知道**你在 C++ 里写的那些变构代码。
+##### 2. 启动 SITL (客户端 - 纯净 JSON 模式)
+在第二个终端窗口，**不要用 `-f gazebo-iris`**（那个参数包容易带旧配置），我们用最原始的指令：
 
-**结论：**
-要想在 3D 仿真里看到 WuK 变形，你不能改 C++，你必须**改 SDF 文件**。
-你需要创建一个 `wuk.sdf`，在里面定义“电机臂是一个关节，受 Servo 9 控制”。
+```bash
+# --model JSON : 强制使用 JSON 接口
+# --rate 400   : 提高仿真频率
+sim_vehicle.py -v ArduCopter --model JSON --console --map
+```
+
+---
+
+#### 第三阶段：如果还是连不上（参数注入法）
+
+如果执行完第二阶段，两边还是没反应，或者 MAVProxy 报错连接失败，说明端口没对上。我们需要手动告诉 SITL 往哪里发数据。
+
+请**关掉 SITL**，重新用下面这个**带参数注入**的指令启动：
+
+```bash
+sim_vehicle.py -v ArduCopter --model JSON --console --map --custom-location=35.363261,138.730795,584,353
+```
+
+**启动后，立刻在 MAVProxy 终端里输入以下指令（确保参数正确）：**
+
+```bash
+# 告诉飞控：我要用 JSON 接口
+param set SIM_JSON_ENABLE 1
+
+# 告诉飞控：Gazebo 的插件在本地 9002 端口等着呢
+# 注意：这个端口必须和 Gazebo 插件的一致，默认是 9002
+# 也就是 TCP connection
+```
+
+**但是，最最稳妥的方法是直接修改默认参数文件。**
+ArduPilot 会保存上次的参数。为了彻底修复，请在 SITL 启动后（MAVProxy 界面），执行：
+
+```bash
+param set SIM_JSON_ENABLE 1
+param set AHRS_EKF_TYPE 3
+reboot
+```
+*(输入 reboot 后，SITL 会重启)*
+
+---
+
+#### 第四阶段：验证飞行
+
+如果一切正常：
+1.  **Gazebo 终端：** 不再疯狂刷屏报错。
+2.  **MAVProxy 终端：** 显示 `GPS: 3D Fix`。
+3.  **操作：**
+    ```bash
+    mode guided
+    arm throttle
+    takeoff 5
+    ```
+4.  **画面：** Gazebo 里的飞机应该平滑升起，且任务管理器里 GPU 占用率应该上升。
+
+---
+
+#### 总结你的“流畅操控”指令集
+
+**环境准备（仅需做一次）：**
+1.  修改 `.bashrc` 加入 NVIDIA 环境变量。
+2.  `source ~/.bashrc`。
+
+**日常启动流程：**
+1.  **终端 A：** `gz sim -v4 -r iris_runway.sdf`
+2.  **终端 B：** `sim_vehicle.py -v ArduCopter --model JSON --console --map`
+3.  **终端 B (首次)：** `mode guided` -> `arm throttle` -> `takeoff 5`
+
+**请按此执行。如果 `glxinfo -B` 显示已经是 NVIDIA 了但 Gazebo 还是很卡，请告诉我，那可能是 Gazebo 自身的渲染引擎设置问题。**
 
 
 ---
