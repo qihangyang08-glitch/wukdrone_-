@@ -18,7 +18,7 @@
 
 ---
 
-### 第一步：安装 Gazebo (Garden/Harmonic)
+### 第一步：安装 Gazebo (Garden/Harmonic)和各种依赖包
 
 在你的 WSL Ubuntu 终端里，我们需要安装 Gazebo 模拟器和 ArduPilot 的连接插件。
 
@@ -40,6 +40,11 @@ sudo apt-get install gz-garden
 # 安装opencv开发包
 sudo apt update
 sudo apt install libopencv-dev -y
+
+#安装 GStreamer 开发包
+sudo apt update
+sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gl -y
+
 ```
 
 #### 2. 安装 ArduPilot-Gazebo 插件
