@@ -111,8 +111,104 @@ source ~/.bashrc
     *   **你会在 3D 窗口里看到飞机真的飞起来了！**
 
 ---
+### 第三步：优化方案
 
-### 第三步：怎么实现“WuK”的 3D 变构？
+
+#### 1. 为什么报错 `Incorrect protocol magic 0`？（核心问题）
+
+**一句话解释：语言不通。**
+
+*   **现状：**
+    *   你的 **Gazebo 插件**（刚才编译的）是最新版的，它讲的是 **“新版二进制语言”**。
+    *   你的 **SITL**（通过 `-f gazebo-iris` 启动）默认配置是用 **“旧版 JSON 文本语言”** 发送数据。
+*   **结果：** Gazebo 插件收到数据包，一检查开头（Magic Number），发现是 0（或者格式不对），不是它期待的 `18458`，所以它拒绝通信。这就导致了“两边没反应”。
+
+**✅ 解决方法：**
+我们需要强迫 SITL 也讲“新版二进制语言”。
+
+1.  **先启动 Gazebo：**
+    ```bash
+    gz sim -v4 -r iris_runway.sdf
+    ```
+2.  **再启动 SITL（不带 -f 参数，先手动配参数）：**
+    为了避免 `-f gazebo-iris` 自动加载旧参数，我们用默认模式启动，然后手动改。
+    ```bash
+    sim_vehicle.py -v ArduCopter --console --map
+    ```
+    *(注意：这时它跑的是你之前改过的那个“鸠占鹊巢”的 WuK 物理模型，但我们先不管它，我们要先连上 Gazebo)*
+
+3.  **在 MAVProxy 终端修改参数：**
+    输入以下指令，把 SITL 切换到 Gazebo 模式：
+    ```bash
+    param set SIM_GZ_ENABLE 1
+    param set SIM_GZ_URI "127.0.0.1:9002"
+    ```
+    *   `SIM_GZ_ENABLE 1`: 开启新版 Gazebo 接口。
+    *   `URI`: 指定通信地址（Gazebo 插件默认监听 9002）。
+
+4.  **重启 SITL：**
+    按 `Ctrl+C` 关掉 SITL，然后再次运行：
+    ```bash
+    sim_vehicle.py -v ArduCopter --console --map
+    ```
+
+5.  **观察：**
+    这时候 Gazebo 里的报错应该会消失，或者变成 `Connected`。你再试着 `mode guided`, `takeoff`，看看 Gazebo 里的飞机动没动。
+
+---
+
+#### 2. 为什么 Gazebo 很卡？（性能优化）
+
+你的电脑是游戏本（有独显），但 WSL2 默认可能在用 CPU 跑图形渲染（llvmpipe），或者 Gazebo 的实时因数（Real Time Factor）太高。
+
+**✅ 优化方案：**
+
+1.  **强制开启 GPU 加速：**
+    在 Ubuntu 终端里，执行以下命令后再启动 Gazebo：
+    ```bash
+    export LIBGL_ALWAYS_SOFTWARE=0
+    export MESA_GL_VERSION_OVERRIDE=3.3
+    gz sim -v4 -r iris_runway.sdf
+    ```
+2.  **检查 WSL 显存：**
+    Gazebo 极吃显存。在 Windows 的任务管理器 -> 性能 -> GPU 栏，看看当你运行 Gazebo 时，**3D** 占用率高不高？如果很低，说明 WSL 没用上显卡。
+    *   *补救：去 NVIDIA 官网下载最新的 Windows 显卡驱动（GeForce Experience），它会自动给 WSL 安装驱动。*
+3.  **不要同时开 Map 和 Console：**
+    如果实在卡，SITL 启动时去掉地图：
+    ```bash
+    sim_vehicle.py -v ArduCopter --console
+    ```
+    *(省掉一个 Map 窗口能省不少资源)*
+
+---
+
+#### 3. 最关键的概念：为什么“变构”失效了？
+
+你问：“我们昨天不是修改了 SITL 的机型了吗？为什么 Gazebo 里还是 Iris，而且不变形？”
+
+这是一个非常重要的架构分界线。请仔细看下图：
+
+*   **阶段一（昨天做的）：内部物理引擎**
+    *   **大脑：** ArduPilot
+    *   **身体：** `SIM_Frame.cpp` (**C++ 代码**)
+    *   **现象：** 只有数据，没有画面（或只有 2D 地图）。
+    *   **你的修改：** 你改了 `SIM_Frame.cpp`，所以昨天在 2D 模式下能坠机。
+
+*   **阶段二（现在做的）：外部物理引擎**
+    *   **大脑：** ArduPilot
+    *   **身体：** **Gazebo (`iris_runway.sdf`)**
+    *   **现象：** 有 3D 画面。
+    *   **关键点：** 当连接 Gazebo 时，ArduPilot 会**关闭**内部的 `SIM_Frame.cpp`，全权委托 Gazebo 来计算物理。
+    *   **结果：** Gazebo 读取的是 `iris_runway.sdf` 文件。这个文件里定义的是“普通的 Iris 四旋翼”。它**完全不知道**你在 C++ 里写的那些变构代码。
+
+**结论：**
+要想在 3D 仿真里看到 WuK 变形，你不能改 C++，你必须**改 SDF 文件**。
+你需要创建一个 `wuk.sdf`，在里面定义“电机臂是一个关节，受 Servo 9 控制”。
+
+
+---
+
+### 第四步：怎么实现“WuK”的 3D 变构？
 
 要实现你的变构，我们需要创建一个自定义的 `.sdf` 文件（模型描述文件）。
 
