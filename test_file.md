@@ -51,6 +51,11 @@ ls -lh build/sitl/bin/arducopter
 ```bash
 ./test_wuk_interactive.sh
 ```
+*或手动:*
+```bash
+sim_vehicle.py -v ArduCopter --console --map -w \
+    --add-param-file=Tools/autotest/default_params/wuk.parm
+```
 ### 步骤1: 测试
 **在MAVProxy中执行**:
 ```
