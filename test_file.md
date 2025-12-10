@@ -89,6 +89,14 @@ exit
 
 或按 Ctrl+C
 
+
+# 手动分析
+./tools/wuk_log_parser_v3 wuk_gb.log wuk_parsed_v3.csv
+python3 tools/wuk_plot_v3.py wuk_parsed_v3.csv wuk_gb.jsonl
+
+# 查看结果
+ls -lh wuk_analysis_v3.png  # 201KB图表
+
 ### 步骤3: 自动后处理
 脚本会自动:
 1. 检查日志文件存在性
