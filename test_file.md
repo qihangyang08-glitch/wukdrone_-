@@ -51,8 +51,12 @@ ls -lh build/sitl/bin/arducopter
 ### 2.1 方法1: 使用快速启动脚本
 ```bash
 cd ~/ardupilot
-./test_wuk_sitl.sh
+./test_wuk_sitl_fixed.sh
 ```
+
+**重要说明**: 
+- 使用**默认frame**(不指定`-f wuk`)因为所有quad机型已被"劫持"为wuk_motors
+- 使用原有的`wuk.parm`参数文件
 
 **期望输出**:
 ```
@@ -81,22 +85,25 @@ MAVProxy commands:
 ### 2.2 方法2: 手动启动(推荐用于调试)
 ```bash
 cd ~/ardupilot
-Tools/autotest/sim_vehicle.py -v ArduCopter -f wuk --console --map \
-    --add-param-file=Tools/autotest/default_params/copter-wuk.parm
+Tools/autotest/sim_vehicle.py -v ArduCopter --console --map -w \
+    --add-param-file=Tools/autotest/default_params/wuk.parm
 ```
+
+**注意**: 不要使用`-f wuk`,因为代码中已将默认quad机型替换为wuk_motors配置
 
 **期望输出**:
 ```
 Using waf configure options: --board sitl
 Using existing apj_tool.py
 WAF build configured
-[INFO] Using frame: wuk (4 motors)
 Starting SITL...
 Starting MAVProxy...
 Loaded module console
 Loaded module map
-MAVProxy master> 
+MAVProxy master>
 ```
+
+**说明**: 不会显示"Using frame: wuk",因为使用的是默认frame(内部已是wuk_motors)
 
 ---
 
@@ -464,20 +471,34 @@ Test completed successfully!
 ## 九、问题排查
 
 ### 9.1 SITL启动失败
-**症状**: `Unknown frame type: wuk`
+**症状1**: `Unknown frame type: wuk`  
+**原因**: 不应该使用`-f wuk`参数  
+**解决**: 使用默认frame启动(不加`-f`参数)
 
-**检查**:
+**症状2**: `[Errno 111] Connection refused sleeping`  
+**原因**: 使用了`-f wuk`导致frame查找失败  
+**解决**: 
 ```bash
-grep -n "wuk" libraries/SITL/SIM_Frame.cpp | head -3
+# 错误: Tools/autotest/sim_vehicle.py -v ArduCopter -f wuk ...
+# 正确: Tools/autotest/sim_vehicle.py -v ArduCopter --console --map -w ...
+```
+
+**验证机型配置**:
+```bash
+grep -n "wuk_motors" libraries/SITL/SIM_Frame.cpp | head -10
 ```
 
 **期望输出**:
 ```
 48:static Motor wuk_motors[] =
-410:    Frame("wuk", 4, wuk_motors),
+411:    Frame("wuk", 4, wuk_motors),
+412:    Frame("+",         4, wuk_motors),
+413:    Frame("quad",      4, wuk_motors),
+414:    Frame("copter",    4, wuk_motors),
+415:    Frame("x",         4, wuk_motors),
 ```
 
-**解决**: 如果没有,说明代码未正确应用,重新编译。
+说明所有主要quad机型都已使用wuk_motors配置。
 
 ### 9.2 RC9不触发变形
 **症状**: `rc 9 1900` 后没有模式变化
@@ -681,8 +702,12 @@ chmod +x full_test.sh
 # 编译
 ./waf configure --board sitl && ./waf copter
 
-# 启动SITL
-./test_wuk_sitl.sh
+# 启动SITL (使用修正后的脚本)
+./test_wuk_sitl_fixed.sh
+
+# 或手动启动 (不使用-f wuk!)
+sim_vehicle.py -v ArduCopter --console --map -w \
+    --add-param-file=Tools/autotest/default_params/wuk.parm
 
 # MAVProxy基本命令
 mode LOITER          # 切换模式
